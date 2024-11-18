@@ -1,0 +1,105 @@
+from cmu_graphics import *
+import random
+import string
+
+# creates and manages gameboard -- complete (will make it pretty later)
+class GameBoard:
+    def __init__(self, rows, columns):
+        self.rows = rows
+        self.columns = columns
+        self.board = self.createBoard()
+
+    def createBoard(self):
+        board = []
+        for i in range(self.rows):
+            row = [random.choice(string.ascii_uppercase) for j in range(self.columns)]
+            board.append(row)
+        return board
+
+# checks if word is in word is valid -- work in progress
+class WordValidator:
+    #wordList to be imported later 
+    def __init__(self, wordList):
+        self.validWords = set(wordList)
+
+    def isValid(self, word):
+        return word.upper() in self.validWords
+        
+# draws stuff for the game -- work in progress
+class GameUI:
+    def drawGameTitle(self, app): 
+        drawLabel('WordHunt+', 200, 30, size=20, bold=True)
+    
+    def drawLetterTile(self, x, y, letter):
+        drawRect(x, y, 40, 40, fill='lightgreen', border='black')
+        drawLabel(letter, x + 20, y + 20, size=20, fill= 'darkgreen', bold=True)
+
+    def drawBoard(self, app, board):
+        for i in range(len(board)):
+            for j in range(len(board[i])):
+                x = 80 + j * 50
+                y = 80 + i * 50
+                self.drawLetterTile(x, y, board[i][j])
+
+    def drawScore(self, app, score):
+        drawLabel(f'Score: {score}', 200, 375, size=20)
+
+# main game logic -- work in progress
+class WordHuntPlus:
+    def __init__(self):
+        self.board = GameBoard(5, 5)
+        self.wordValidator = WordValidator(['apple', 'banana', 'orange', 'grape', 'watermelon'])
+        self.ui = GameUI()
+        self.score = 0
+        self.currentWord = ''
+        self.selectedCells = []
+
+    def onMousePress(self, mouseX, mouseY):
+        cellX = int((mouseX - 100) // 50)
+        cellY = int((mouseY - 80) // 50)
+        if 0 <= cellX < 5 and 0 <= cellY < 5:
+            self.currentWord = self.board.board[cellY][cellX]
+            self.selectedCells = [(cellX, cellY)]
+
+    def onMouseDrag(self, mouseX, mouseY):
+        cellX = int((mouseX - 100) // 50)
+        cellY = int((mouseY - 80) // 50)
+        if 0 <= cellX < 5 and 0 <= cellY < 5 and (cellX, cellY) not in self.selectedCells:
+            self.currentWord += self.board.board[cellY][cellX]
+            self.selectedCells.append((cellX, cellY))
+
+    def onMouseRelease(self, mouseX, mouseY):
+        if self.wordValidator.isValid(self.currentWord) and self.currentWord:
+            self.score += len(self.currentWord)
+        self.currentWord = ''
+        self.selectedCells = []
+
+def redrawAll(app):
+    app.game.ui.drawGameTitle(app)
+    app.game.ui.drawBoard(app, app.game.board.board)
+    app.game.ui.drawScore(app, app.game.score)
+
+# highlights selected cells
+    for cell in app.game.selectedCells:
+        cellX, cellY = cell
+        x = 80 + cellX * 50
+        y = 80 + cellY * 50
+        drawRect(x, y, 40, 40, fill=None, border='yellow', borderWidth=3)
+
+def onMousePress(app, mouseX, mouseY):
+    app.game.onMousePress(mouseX, mouseY)
+
+def onMouseDrag(app, mouseX, mouseY):
+    app.game.onMouseDrag(mouseX, mouseY)
+
+def onMouseRelease(app, mouseX, mouseY):
+    app.game.onMouseRelease(mouseX, mouseY)
+
+def onAppStart(app):
+    app.game = WordHuntPlus()
+
+def main():
+    runApp(width=400, height=400)
+
+if __name__ == "__main__":
+    main()

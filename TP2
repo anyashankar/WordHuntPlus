@@ -1,0 +1,553 @@
+from cmu_graphics import *
+import random
+import string
+import time
+
+# reads words from a wordlist -- more optimized
+def getWordLists(filename='sowpods.txt'):
+    easy = set()
+    medium = set()
+    hard = set()
+    with open(filename, 'r') as file:
+        for word in file:
+            word = word.strip().upper()
+            if len(word) == 3:
+                easy.add(word)
+            elif 3 <= len(word) <= 4:
+                medium.add(word)
+            elif len(word) >= 5:
+                hard.add(word)
+    return {'easy': easy, 'medium': medium, 'hard': hard}
+
+# creates and manages gameboard
+class GameBoard:
+    def __init__(self, size, wordLists, difficulty):
+        self.size = size
+        self.difficulty = difficulty
+        self.wordList = wordLists[difficulty]
+        self.board = self.createBoard()
+        self.allPossibleWords = self.findAllWords()
+
+# groups by difficulty level -- difficulty is determined by word length
+    def filterWordsByDifficulty(self, wordList):
+        if self.difficulty == 'easy':
+            return set(word for word in wordList if len(word) == 3)
+        elif self.difficulty == 'medium':
+            return set(word for word in wordList if 3 <= len(word) <= 4)
+        else:  # hard
+            return set(word for word in wordList if len(word) >= 5)
+        
+# creates game board
+    def createBoard(self):
+        board = [['' for _ in range(self.size)] for _ in range(self.size)]
+        words = random.sample(list(self.wordList), min(2, len(self.wordList)))
+        for word in words:
+            self.placeWord(board, word)
+        for i in range(self.size):
+            for j in range(self.size):
+                if board[i][j] == '':
+                    board[i][j] = random.choice(string.ascii_uppercase)
+        return board
+
+# adds predetermied words to the board
+    def placeWord(self, board, word):
+        if self.size == 3:
+            word = word[:3]  # truncates word to 3 letters for 3x3 boards
+        directions = [(0,1), (1,0), (1,1), (-1,1)]
+        attempts = 0
+        while attempts < 50:  # limits attempts to avoid infinite loops
+            direction = random.choice(directions)
+            startX, startY = random.randint(0, self.size-1), random.randint(0, self.size-1)
+            endX, endY = startX + direction[0]*(len(word)-1), startY + direction[1]*(len(word)-1)
+            if 0 <= endX < self.size and 0 <= endY < self.size:
+                if self.canPlaceWord(board, word, startX, startY, direction):
+                    self.putWordOnBoard(board, word, startX, startY, direction)
+                    return
+            attempts += 1
+
+    # checks if word can be placed in specific location of the board
+    def canPlaceWord(self, board, word, startX, startY, direction):
+        for i in range(len(word)):
+            x, y = startX + direction[0]*i, startY + direction[1]*i
+            if board[x][y] != '' and board[x][y] != word[i]:
+                return False
+        return True
+
+    # adds the word the to board
+    def putWordOnBoard(self, board, word, startX, startY, direction):
+        for i in range(len(word)):
+            x, y = startX + direction[0]*i, startY + direction[1]*i
+            board[x][y] = word[i]
+
+    # finds all words in the list that are on the board -- included non predetermined words
+    def findAllWords(self): # now limited to about 20 word only for efficiency
+        words = set()
+        for i in range(self.size):
+            for j in range(self.size):
+                self.dfs(i, j, '', set(), words)
+                if len(words) >= 40:
+                    return list(words)[:40]
+        return list(words)
+
+    # helper function that also finds words on the board -- more in depth
+    def dfs(self, i, j, currentWord, visited, words):
+        if len(currentWord) > 8 or len(words) >= 40:
+            return
+        if currentWord in self.wordList:
+            words.add(currentWord)
+        for di, dj in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+            ni, nj = i + di, j + dj
+            if 0 <= ni < self.size and 0 <= nj < self.size and (ni, nj) not in visited:
+                visited.add((ni, nj))
+                self.dfs(ni, nj, currentWord + self.board[ni][nj], visited, words)
+                visited.remove((ni, nj))
+
+# class to manage the game logic
+class WordHuntPlus:
+    def __init__(self, app, difficulty, boardSize):
+        self.app = app
+        wordLists = getWordLists()
+        self.board = GameBoard(boardSize, wordLists, difficulty)
+        self.score = 0
+        self.currentWord = ''
+        self.selectedCells = []
+        self.foundWords = set()
+        self.gameOver = False
+        self.totalTime = 60
+        self.startTime = time.time()
+        self.powerups = {'freeze': 2, 'hint': 3, 'shuffle': 1}
+        self.hintWord = None
+        self.theme = Theme()
+        self.theme.currentTheme = app.theme
+
+    def onMousePress(self, mouseX, mouseY):
+        if self.gameOver:
+            return
+        cellX = int((mouseX - self.app.startX) // self.app.gameBoardSize)
+        cellY = int((mouseY - self.app.startY) // self.app.gameBoardSize)
+        if 0 <= cellX < self.board.size and 0 <= cellY < self.board.size:
+            self.currentWord = self.board.board[cellY][cellX]
+            self.selectedCells = [(cellX, cellY)]
+            self.hintWord = None
+
+    def onMouseDrag(self, mouseX, mouseY):
+        if self.gameOver:
+            return
+        cellX = int((mouseX - self.app.startX) // self.app.gameBoardSize)
+        cellY = int((mouseY - self.app.startY) // self.app.gameBoardSize)
+        if (0 <= cellX < self.board.size and 0 <= cellY < self.board.size and
+            (cellX, cellY) not in self.selectedCells):
+            self.currentWord += self.board.board[cellY][cellX]
+            self.selectedCells.append((cellX, cellY))
+
+    def onMouseRelease(self):
+        if self.gameOver:
+            return
+        if self.currentWord in self.board.wordList and self.currentWord not in self.foundWords:
+            self.score += self.calculatePoints(self.currentWord)
+            self.foundWords.add(self.currentWord)
+        self.currentWord = ''
+        self.selectedCells = []
+        self.hintWord = None
+
+    # calculates points + handles updates to points
+    def calculatePoints(self, word):
+        if len(word) == 3:
+            return 10
+        elif len(word) == 4:
+            return 20
+        elif len(word) == 5:
+            return 30
+        else:
+            return 50
+
+    def updateTime(self):
+        timeLeft = self.totalTime - (time.time() - self.startTime)
+        if timeLeft <= 0:
+            self.gameOver = True
+        return max(timeLeft, 0)
+
+    def usePowerup(self, powerup):
+        if self.powerups[powerup] > 0:
+            self.powerups[powerup] -= 1
+            if powerup == 'freeze':
+                self.totalTime += 10
+            elif powerup == 'hint':
+                self.showHint()
+            elif powerup == 'shuffle':
+                self.shuffleBoard()
+
+    def showHint(self):
+        allPossibleWords = set(self.board.allPossibleWords)  # convert to set if it's a list
+        unFoundWords = allPossibleWords - self.foundWords
+        if unFoundWords:
+            self.hintWord = random.choice(list(unFoundWords))
+            self.selectedCells = self.findWordOnBoard(self.hintWord)
+
+    #finds the word on the board
+    def findWordOnBoard(self, word):
+        for i in range(self.board.size):
+            for j in range(self.board.size):
+                if self.board.board[i][j] == word[0]:
+                    result = self.searchWord(word, i, j, set())
+                    if result:
+                        return result
+        return []
+
+    # #search if word is on the board
+    def searchWord(self, word, i, j, visited):
+        if len(word) == 0:
+            return list(visited)
+        if (i < 0 or i >= self.board.size or j < 0 or j >= self.board.size or
+            (i, j) in visited or self.board.board[i][j] != word[0]):
+            return None
+        visited.add((j, i))
+        for di, dj in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+            result = self.searchWord(word[1:], i + di, j + dj, visited.copy())
+            if result:
+                return result
+        return None
+
+    # powerup -- shuffles the board when the user clicks the button
+    def shuffleBoard(self):
+        flatBoard = [item for sublist in self.board.board for item in sublist]
+        random.shuffle(flatBoard)
+        self.board.board = [flatBoard[i:i+self.board.size] for i in range(0, len(flatBoard), self.board.size)]
+        self.board.allPossibleWords = self.board.findAllWords()
+
+# mamnages the themes and the images/colors associated with them
+class Theme:
+    def __init__(self):
+        self.current_theme = None
+        self.themes = {
+            'Christmas': {
+                'images': [
+                    'picsChristmas/reindeer.png',
+                    'picsChristmas/christmas-tree-in-snow.png',
+                    'picsChristmas/girl-christmas-caroler.png',
+                    'picsChristmas/santa-behind-christmas-tree.png',
+                    'picsChristmas/christmas-gift-blue.png'
+                ],
+                'colors': {
+                    'background': 'lightpink',
+                    'board': 'lightgreen',
+                    'selected': 'gold'
+                }
+            },
+            'Halloween': {
+                'images': [
+                    'picsHalloween/bats-flying-over-graveyard.png',
+                    'picsHalloween/boy-halloween-trick-or-treaters.png',
+                    'picsHalloween/boy-in-vampire-costume.png',
+                    'picsHalloween/candy-corn-pieces.png',
+                    'picsHalloween/witches-hat.png'
+                ],
+                'colors': {
+                    'background': 'orange',
+                    'board': 'blue',
+                    'selected': 'yellow'
+                }
+            },
+            'Thanksgiving': {
+                'images': [
+                    'picsThanksgiving/indian-girl-with-corn.png',
+                    'picsThanksgiving/pilgrim-girl-holding-a-pie.png',
+                    'picsThanksgiving/pilgrims-turkey-and-harvest.png',
+                    'picsThanksgiving/thanksgiving-pie.png',
+                    'picsThanksgiving/turkey-and-pumpkins.png'
+
+                ],
+                'colors': {
+                    'background': 'brown',
+                    'board': 'gold',
+                    'selected': 'red'
+                }
+            }
+        }
+    def getColor(self, colorName):
+        return self.themes[self.currentTheme]['colors'][colorName]
+
+# draws the start screen
+def drawStartScreen(app):
+    drawRect(0, 0, 600, 600, fill='lightBlue')
+    drawLabel('WordHunt+', 300, 100, size=40, bold=True)
+    drawRect(250, 200, 100, 40, fill='lightGreen')
+    drawLabel('Start', 300, 220, size=20)
+    drawRect(150, 280, 150, 40, fill='white', border='black')
+    drawLabel(f'Board: {app.boardSize}x{app.boardSize}', 225, 300, size=16)
+    drawPolygon(280, 290, 290, 310, 300, 290, fill='black')
+    drawRect(320, 280, 150, 40, fill='white', border='black')
+    drawLabel(f'Difficulty: {app.difficulty}', 395, 300, size=16)
+    drawPolygon(450, 290, 460, 310, 470, 290, fill='black')
+    drawRect(250, 350, 100, 40, fill='lightGreen')
+    drawLabel('Instructions', 300, 370, size=16)
+    drawRect(220, 410, 160, 40, fill='white', border='black')
+    drawLabel(f'Theme: {app.theme}', 300, 430, size=16)
+    drawPolygon(330, 420, 340, 440, 350, 420, fill='black')
+
+#handles the theme selection
+def handleThemeSelection(app, mouseX, mouseY):
+    if 250 <= mouseX <= 350 and 410 <= mouseY <= 450:
+        app.showThemeDropdown = not app.showThemeDropdown
+        app.showBoardDropdown = False
+        app.showDifficultyDropdown = False
+        return True
+    
+    if app.showThemeDropdown:
+        themes = ['Christmas', 'Halloween', 'Thanksgiving']
+        for i in range(len(themes)):
+            if 250 <= mouseX <= 350 and 450 + i*40 <= mouseY <= 490 + i*40:
+                app.theme = themes[i]
+                app.showThemeDropdown = False
+                return True
+    return False
+
+#handles the board size selection
+def handleBoardSizeSelection(app, mouseX, mouseY):
+    if 150 <= mouseX <= 300 and 280 <= mouseY <= 320:
+        app.showBoardDropdown = not app.showBoardDropdown
+        app.showDifficultyDropdown = False
+        return True
+    if app.showBoardDropdown:
+        for i in range(3):
+            if 150 <= mouseX <= 300 and 320 + i*40 <= mouseY <= 360 + i*40:
+                app.boardSize = i + 3
+                app.showBoardDropdown = False
+                updateBoardDimensions(app)
+                return True
+    return False
+
+#handles the difficulty selection
+def handleDifficultySelection(app, mouseX, mouseY):
+    if 320 <= mouseX <= 470 and 280 <= mouseY <= 320:
+        app.showDifficultyDropdown = not app.showDifficultyDropdown
+        app.showBoardDropdown = False
+        return True
+    if app.showDifficultyDropdown:
+        difficulties = ['easy', 'medium', 'hard']
+        for i in range(3):
+            if 320 <= mouseX <= 470 and 320 + i*40 <= mouseY <= 360 + i*40:
+                app.difficulty = difficulties[i]
+                app.showDifficultyDropdown = False
+                return True
+    return False
+
+# handles the dropdowns
+def drawDropdowns(app):
+    if app.showThemeDropdown:
+        themes = ['Christmas', 'Halloween', 'Thanksgiving']
+        for i in range(len(themes)):
+            drawRect(250, 450 + i*40, 100, 40, fill='white', border='black')
+            drawLabel(themes[i], 300, 470 + i*40, size=16)
+    if app.showBoardDropdown:
+        for i in range(3):
+            drawRect(150, 320 + i*40, 150, 40, fill='white', border='black')
+            drawLabel(f'{i+3}x{i+3}', 225, 340 + i*40, size=16)
+    if app.showDifficultyDropdown:
+        difficulties = ['easy', 'medium', 'hard']
+        for i in range(3):
+            drawRect(320, 320 + i*40, 150, 40, fill='white', border='black')
+            drawLabel(difficulties[i], 395, 340 + i*40, size=16)
+
+def drawInstructions(app):
+    drawRect(0, 0, 600, 600, fill='lightBlue')
+    drawLabel('Instructions', 300, 40, size=30, bold=True)
+    instructions = [
+        "Find words on the board",
+        "Connect adjacent letters",
+        "Words must be 3+ letters",
+        "Points:",
+        "3 letters: 10 points",
+        "4 letters: 20 points",
+        "5 letters: 30 points",
+        "6+ letters: 50 points",
+        "Powerups:",
+        "Freeze: +10 seconds",
+        "Hint: Highlights a word",
+        "Shuffle: Rearranges board",
+        "Difficulty Levels:",
+        "Easy mode: only 3 letter words",
+        "Medium mode: 3 and 4 letter words",
+        "Hard mode: only 5+ letter words", 
+        "For 3x3 and 4x4, hard mode is not available",
+    ]
+    for i in range(len(instructions)):
+        drawLabel(instructions[i], 300, 90 + i * 28, size=16)
+    drawRect(250, 560, 100, 30, fill='lightGreen')
+    drawLabel('Back', 300, 575, size=16)
+
+# draws the actual game after the start screen
+def drawGame(app):
+    drawLabel('WordHunt+', 300, 30, size=30, bold=True)
+    # draw the game board with 3D effect
+    for i in range(app.game.board.size):
+        for j in range(app.game.board.size):
+            x, y = app.boardLayout[i][j]
+            isSelected = (j, i) in app.game.selectedCells
+            isHinted = app.game.hintWord and (j, i) in app.game.selectedCells
+            # draw bottom shadow for 3D effect
+            drawRect(x + 2, y + 2, app.gameBoardSize-1, app.gameBoardSize-1, 
+                    fill='brown')
+            # draw main tile
+            fill = 'yellow' if isSelected else 'orange' if isHinted else 'lightGreen'
+            drawRect(x, y, app.gameBoardSize-1, app.gameBoardSize-1, 
+                    fill=fill, border='black')
+            # draw top highlight for 3D effect
+            drawLine(x, y, x + app.gameBoardSize-1, y, 
+                    fill='white', opacity=40)
+            drawLine(x, y, x, y + app.gameBoardSize-1, 
+                    fill='white', opacity=40)
+            # draw letter with shadow
+            drawLabel(app.game.board.board[i][j], 
+                     x + app.gameBoardSize//2 + 1, 
+                     y + app.gameBoardSize//2 + 1, 
+                     size=min(24, app.gameBoardSize-10), 
+                     fill='yellow')
+            drawLabel(app.game.board.board[i][j], 
+                     x + app.gameBoardSize//2, 
+                     y + app.gameBoardSize//2, 
+                     size=min(24, app.gameBoardSize-10), 
+                     fill='darkGreen', bold=True)
+            
+    
+    if app.theme in app.game.theme.themes:
+        images = app.game.theme.themes[app.theme]['images']
+        imageSize = 120  # increase size
+        
+        positions = [
+            (25, 160),    # far left middle
+            (460, 160),   # far right middle
+            (25, 300),   # left of board
+            (460, 300),   # right of board
+        ]
+        
+        for i in range(len(images)):
+            if i < len(positions):
+                drawImage(images[i], positions[i][0], positions[i][1], 
+                         width=imageSize, height=imageSize)
+
+    drawLabel(f'Score: {app.game.score}', 300, 570, size=24)
+    drawLabel(f'Current Word: {app.game.currentWord}', 300, 540, size=20)
+    
+    # time bar
+    timeLeft = max(0, app.game.updateTime())
+    drawRect(100, 70, 400, 20, fill='lightGray')
+    if not app.game.gameOver:
+        timeBarWidth = max(1, (timeLeft / app.game.totalTime) * 400)
+        drawRect(100, 70, timeBarWidth, 20, fill='green')
+
+    drawPowerups(app)
+
+# draws the powerups 
+def drawPowerups(app):
+    powerups = [('Freeze', 'blue'), ('Hint', 'yellow'), ('Shuffle', 'green')]
+    for i in range(len(powerups)):
+        x = 100 + i * 150
+        y = app.powerupStartY
+        drawRect(x, y, 100, 40, fill=powerups[i][1])
+        drawLabel(f"{powerups[i][0]}: {app.game.powerups[powerups[i][0].lower()]}", x + 50, y + 20, size=16)
+
+# draws gameover screen
+def drawGameOver(app):
+    drawRect(0, 0, 600, 600, fill='white')
+    drawLabel('Game Over!', 300, 50, size=36, bold=True)
+    drawLabel(f'Final Score: {app.game.score}', 300, 100, size=24)
+    
+    drawLabel('Words You Found:', 100, 150, size=20, align='left')
+    foundWords = list(app.game.foundWords)
+    for i in range(min(15, len(foundWords))):
+        drawLabel(foundWords[i], 150, 180 + i * 20, size=16, align='left')
+    if len(foundWords) > 15:
+        drawLabel("...and more", 150, 180 + 15 * 20, size=16, align='left')
+    drawLabel('All Possible Words:', 300, 150, size=20, align='left')
+    allWords = list(app.game.board.allPossibleWords)
+    for i in range(min(15, len(allWords))):
+        drawLabel(allWords[i], 350, 180 + i * 20, size=16, align='left')
+    if len(allWords) > 15:
+        drawLabel("...and more", 350, 180 + 15 * 20, size=16, align='left')
+
+def redrawAll(app):
+    if app.gameState == 'start':
+        drawStartScreen(app)
+        drawDropdowns(app)
+    elif app.gameState == 'instructions':
+        drawInstructions(app)
+    elif app.gameState == 'playing':
+        if not app.game.gameOver:
+            drawGame(app)
+        else:
+            drawGameOver(app)
+
+def onMousePress(app, mouseX, mouseY):
+    if app.gameState == 'start':
+        if 250 <= mouseX <= 350 and 200 <= mouseY <= 240:
+            app.gameState = 'playing'
+            app.game = WordHuntPlus(app, app.difficulty, app.boardSize)
+        elif handleBoardSizeSelection(app, mouseX, mouseY):
+            pass
+        elif handleDifficultySelection(app, mouseX, mouseY):
+            pass
+        elif handleThemeSelection(app, mouseX, mouseY):
+            pass
+        elif 250 <= mouseX <= 350 and 350 <= mouseY <= 390:
+            app.gameState = 'instructions'
+    elif app.gameState == 'instructions':
+        if 250 <= mouseX <= 350 and 550 <= mouseY <= 590:
+            app.gameState = 'start'
+    elif app.gameState == 'playing':
+        if app.powerupStartY <= mouseY <= app.powerupStartY + 40:
+            if 150 <= mouseX <= 250:
+                app.game.usePowerup('freeze')
+            elif 300 <= mouseX <= 400:
+                app.game.usePowerup('hint')
+            elif 450 <= mouseX <= 550:
+                app.game.usePowerup('shuffle')
+        else:
+            app.game.onMousePress(mouseX, mouseY)
+
+def onMouseDrag(app, mouseX, mouseY):
+    if app.gameState == 'playing':
+        app.game.onMouseDrag(mouseX, mouseY)
+
+def onMouseRelease(app, mouseX, mouseY):
+    if app.gameState == 'playing':
+        app.game.onMouseRelease()
+
+def onStep(app):
+    if app.gameState == 'playing' and not app.game.gameOver:
+        app.game.updateTime()
+
+# helps update board dimensions
+def updateBoardDimensions(app):
+    app.gameBoardSize = min(60, 480 // app.boardSize)
+    app.gameBoardWidth = app.gameBoardSize * app.boardSize
+    app.gameBoardHeight = app.gameBoardSize * app.boardSize
+    app.startX = (600 - app.gameBoardWidth) // 2
+    app.startY = (600 - app.gameBoardHeight) // 2
+    app.powerupStartY = app.startY + app.gameBoardHeight + 20
+    app.boardLayout = [
+        [(app.startX + j * app.gameBoardSize, app.startY + i * app.gameBoardSize) for j in range(app.boardSize)]
+        for i in range(app.boardSize)
+    ]
+
+def onAppStart(app):
+    app.gameState = 'start'
+    app.boardSize = 5
+    app.difficulty = 'medium'
+    app.theme = 'Christmas'
+    app.showBoardDropdown = False
+    app.showDifficultyDropdown = False
+    app.showThemeDropdown = False
+    app.game = None
+    updateBoardDimensions(app)
+
+def main():
+    runApp(width=600, height=600)
+
+if __name__ == "__main__":
+    main() 
+
+# Stuff left to do: 
+# rounded buttons
+# user inputted words
+# make the visuals prettier

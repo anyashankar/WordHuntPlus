@@ -5,6 +5,7 @@ import time
 
 # reads words from a wordlist -- more optimized
 def getWordLists(filename='sowpods.txt'):
+    # the words are from this link: https://raw.githubusercontent.com/jmlewis/valett/master/scrabble/sowpods.txt
     easy = set()
     medium = set()
     hard = set()
@@ -219,6 +220,7 @@ class WordHuntPlus:
 class Theme:
     def __init__(self):
         self.current_theme = None
+        # all images are from this link: https://www.mycutegraphics.com/graphics/holiday-images.html
         self.themes = {
             'Christmas': {
                 'images': [
@@ -408,24 +410,20 @@ def drawGame(app):
                      y + app.gameBoardSize//2, 
                      size=min(24, app.gameBoardSize-10), 
                      fill='darkGreen', bold=True)
-            
     
     if app.theme in app.game.theme.themes:
         images = app.game.theme.themes[app.theme]['images']
         imageSize = 120  # increase size
-        
         positions = [
             (25, 160),    # far left middle
             (460, 160),   # far right middle
             (25, 300),   # left of board
             (460, 300),   # right of board
         ]
-        
         for i in range(len(images)):
             if i < len(positions):
                 drawImage(images[i], positions[i][0], positions[i][1], 
                          width=imageSize, height=imageSize)
-
     drawLabel(f'Score: {app.game.score}', 300, 570, size=24)
     drawLabel(f'Current Word: {app.game.currentWord}', 300, 540, size=20)
     
